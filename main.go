@@ -113,7 +113,7 @@ func encodeToTree(chars []CharEncoding) *Node {
 	pairs := []Node{}
 
 	curMainNode := Node{}
-	for _, char := range chars {
+	for idx, char := range chars {
 		node := Node{
 			Char: char.Val,
 			Freq: char.Freq,
@@ -129,6 +129,11 @@ func encodeToTree(chars []CharEncoding) *Node {
 			curMainNode.Freq = curMainNode.Left.Freq + curMainNode.Right.Freq
 			pairs = append(pairs, curMainNode)
 			curMainNode = Node{}
+		} else if idx == len(chars)-1 && (curMainNode.Left == nil || curMainNode.Right == nil) {
+			prevLast := pairs[len(pairs)-1]
+			curMainNode.Right = &prevLast
+			curMainNode.Left = &node
+			pairs[len(pairs)-1] = curMainNode
 		}
 	}
 
@@ -136,7 +141,7 @@ func encodeToTree(chars []CharEncoding) *Node {
 }
 
 func main() {
-	encodeStr := "hello world"
+	encodeStr := "hello world!"
 	asBts := []byte(encodeStr)
 
 	occurance := map[byte]int{}
