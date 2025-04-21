@@ -418,10 +418,6 @@ func decodeCompressedFile(filename string) (string, error) {
 
 	}
 
-	for i, b := range binData {
-		fmt.Printf("Byte %d: %08b\n", i, b)
-	}
-
 	metaR := CompressedFileMetaData{}
 	err = json.Unmarshal(metaBtsRead, &metaR)
 	if err != nil {
@@ -430,17 +426,6 @@ func decodeCompressedFile(filename string) (string, error) {
 
 	binBuf := bytes.NewBuffer(binData)
 	binReader := newBitReader(binBuf, int64(metaR.EncodedLen), metaR.PaddingSize)
-
-	fmt.Println("dict:")
-	for char, encoding := range metaR.Dict {
-		fmt.Printf("Char: %c, Code: ", char)
-		for i := encoding.Size - 1; i >= 0; i-- {
-			bit := (encoding.Path >> uint(i)) & 1
-			fmt.Printf("%d", bit)
-		}
-
-		fmt.Printf(" (Size: %d, Raw Path: %d)\n", encoding.Size, encoding.Path)
-	}
 
 	lookupTable := map[CharPathEncoding]byte{}
 	for key, val := range metaR.Dict {
@@ -461,15 +446,7 @@ func decodeCompressedFile(filename string) (string, error) {
 		currPath = (currPath << 1) | uint64(bit)
 		pathLen++
 
-		debugStr := ""
-		for i := 0; i < pathLen; i++ {
-			bit := (currPath >> uint(pathLen-1-i)) & 1
-			debugStr += fmt.Sprintf("%d", bit)
-		}
-
 		if char, ok := lookupTable[CharPathEncoding{Path: currPath, Size: pathLen}]; ok {
-			fmt.Println("debugStr:", debugStr)
-			fmt.Println("char found: ", string(char))
 			decoded += string(char)
 			pathLen = 0
 			currPath = 0
