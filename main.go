@@ -184,7 +184,7 @@ func huffmanEncoding(input string) ([]CharPathEncoding, map[byte]CharPathEncodin
 	})
 
 	asTree := encodeToTree(asList)
-	printTree(asTree, "", false)
+	//printTree(asTree, "", false)
 	charDict := map[byte]CharPathEncoding{}
 	treeToDict(asTree, charDict, &Path{})
 
@@ -196,7 +196,28 @@ func huffmanEncoding(input string) ([]CharPathEncoding, map[byte]CharPathEncodin
 	return encoded, charDict
 }
 
+func fileExists(filename string) bool {
+	_, err := os.Stat(filename)
+	if err == nil {
+		return true
+	}
+
+	if os.IsNotExist(err) {
+		return false
+	}
+
+	return false
+}
+
 func writeCompressionToFile(bits []CharPathEncoding, dict map[byte]CharPathEncoding, filename string) error {
+	if !fileExists(filename) {
+		fileC, err := os.Create(filename)
+		if err != nil {
+			return fmt.Errorf("failed to create file: %+v", err)
+		}
+		fileC.Close()
+	}
+
 	file, err := os.OpenFile(filename, os.O_WRONLY, 0777)
 	if err != nil {
 		return fmt.Errorf("opening file failed: %+v", err)
