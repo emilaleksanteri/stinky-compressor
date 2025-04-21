@@ -151,7 +151,7 @@ func encodeToTree(chars []CharEncoding) *Node {
 	return buildTree(pairs)
 }
 
-func huffmanEncoding(input string) ([]uint64, map[byte]CharPathEncoding) {
+func huffmanEncoding(input string) ([]CharPathEncoding, map[byte]CharPathEncoding) {
 	asBts := []byte(input)
 
 	occurance := map[byte]int{}
@@ -188,46 +188,37 @@ func huffmanEncoding(input string) ([]uint64, map[byte]CharPathEncoding) {
 	charDict := map[byte]CharPathEncoding{}
 	treeToDict(asTree, charDict, &Path{})
 
-	encoded := []uint64{}
+	encoded := []CharPathEncoding{}
 	for _, bt := range asBts {
-		encoded = append(encoded, charDict[bt].Path)
+		encoded = append(encoded, charDict[bt])
 	}
 
 	return encoded, charDict
 }
 
-func writeCompressionToFile(bits []uint64, dict map[byte]CharPathEncoding, filename string) error {
+func writeCompressionToFile(bits []CharPathEncoding, dict map[byte]CharPathEncoding, filename string) error {
 	file, err := os.OpenFile(filename, os.O_WRONLY, 0777)
 	if err != nil {
 		return fmt.Errorf("opening file failed: %+v", err)
 	}
 	defer file.Close()
 
-	toEncode := []CharPathEncoding{}
-	for _, bit := range bits {
-		for _, val := range dict {
-			if val.Path == bit {
-				toEncode = append(toEncode, val)
-				break
-			}
-		}
-	}
-
-	padding := 0
 	buf := []byte{}
 	binBuf := bytes.NewBuffer(buf)
 	binWriter := newBitWriter(binBuf)
-	for _, enc := range toEncode {
+	for _, enc := range bits {
 		err := binWriter.WriteBits(enc.Path, enc.Size)
 		if err != nil {
 			return fmt.Errorf("failed to write bits: %+v", err)
 		}
 
-		padding, err = binWriter.Flush()
-		if err != nil {
-			return fmt.Errorf("failed to flush bits: %+v", err)
-		}
 	}
+
+	padding, err := binWriter.Flush()
+	if err != nil {
+		return fmt.Errorf("failed to flush bits: %+v", err)
+	}
+
 
 	metadata := CompressedFileMetaData{
 		EncodedLen:  binBuf.Len(),
@@ -240,7 +231,7 @@ func writeCompressionToFile(bits []uint64, dict map[byte]CharPathEncoding, filen
 		return fmt.Errorf("failed to marshal metadata: %+v", err)
 	}
 
-	metaBts = append(metaBts, []byte(META_SEPARATOR)...)
+	metaBts = append(metaBts, byte(META_SEPARATOR))
 	_, err = file.Write(metaBts)
 	if err != nil {
 		return fmt.Errorf("failed to write meta bytes to file: %+v", err)
@@ -254,11 +245,11 @@ func writeCompressionToFile(bits []uint64, dict map[byte]CharPathEncoding, filen
 	return nil
 }
 
-func decodeHuffman(bits []uint64, dict map[byte]CharPathEncoding) string {
+func decodeHuffman(bits []CharPathEncoding, dict map[byte]CharPathEncoding) string {
 	decoded := ""
 	for _, u := range bits {
 		for key, val := range dict {
-			if val.Path == u {
+			if val.Path == u.Path {
 				decoded += string(key)
 				break
 			}
@@ -326,6 +317,78 @@ func (b *BitWriter) Flush() (int, error) {
 	return paddingSize, nil
 }
 
+type BitReader struct {
+	reader         io.Reader
+	buffer         byte // 8 bits at a time
+	bitsRemaining  int
+	paddingSize    int
+	totalBytesRead int64
+	encodedSize    int64
+	finished       bool
+}
+
+func (b *BitReader) Next() bool {
+	if b.finished {
+		return false
+	}
+
+	return true
+}
+
+func newBitReader(reader io.Reader, encodedSize int64, paddingSize int) *BitReader {
+	return &BitReader{
+		reader:        reader,
+		bitsRemaining: 0,
+		paddingSize:   paddingSize,
+		encodedSize:   encodedSize,
+	}
+}
+
+func (b *BitReader) ReadBit() (byte, error) {
+	if b.bitsRemaining == 0 {
+		if b.totalBytesRead >= b.encodedSize {
+			b.finished = true
+			return 0, nil
+		}
+
+		buf := make([]byte, 1)
+		_, err := b.reader.Read(buf)
+		if err != nil {
+			return 0, err
+		}
+
+		b.buffer = buf[0]
+		b.bitsRemaining = 8
+		b.totalBytesRead++
+
+		if b.totalBytesRead == b.encodedSize {
+			// we substract padding from our buffer expected read size for the case that we have something like
+			// 11110000 with our buffer being 4 bits in this example
+			// now, we can still use our grab first bit method by total size offset below
+			// but we stop reading before we get to the 0000 since our bitsRemaining is 4 instead of 8
+
+			b.bitsRemaining -= b.paddingSize
+			if b.bitsRemaining <= 0 {
+				b.finished = true
+				return 0, nil
+			}
+		}
+	}
+
+	// our buffer is always 8 bits, what we do in the two lines here is we grab the first bit of the buffer
+	// once we have that bit we left shift the buffer to remove the first bit and move everything forward by 1
+	// as we append a 0 bit to the end
+	// e.g., if we have 11111111 as our buffer bits, we do this:
+	// 1 . take 1 from the front
+	// 2. left shift by 1 and our buffer becomes 11111110
+	bit := (b.buffer >> 7) & 1
+	b.buffer <<= 1
+
+	b.bitsRemaining--
+
+	return bit, nil
+}
+
 func decodeCompressedFile(filename string) (string, error) {
 	file, err := os.Open(filename)
 	if err != nil {
@@ -342,7 +405,7 @@ func decodeCompressedFile(filename string) (string, error) {
 	binData := []byte{}
 	readMeta := true
 	for _, bt := range content {
-		if string(bt) == META_SEPARATOR {
+		if bt == META_SEPARATOR {
 			readMeta = false
 			continue
 		}
@@ -355,18 +418,63 @@ func decodeCompressedFile(filename string) (string, error) {
 
 	}
 
+	for i, b := range binData {
+		fmt.Printf("Byte %d: %08b\n", i, b)
+	}
+
 	metaR := CompressedFileMetaData{}
 	err = json.Unmarshal(metaBtsRead, &metaR)
 	if err != nil {
 		return "", fmt.Errorf("failed to unmarshal meta bytes: %+v", err)
 	}
 
-	asuint := []uint64{}
-	for _, bin := range binData {
-		asuint = append(asuint, uint64(bin))
+	binBuf := bytes.NewBuffer(binData)
+	binReader := newBitReader(binBuf, int64(metaR.EncodedLen), metaR.PaddingSize)
+
+	fmt.Println("dict:")
+	for char, encoding := range metaR.Dict {
+		fmt.Printf("Char: %c, Code: ", char)
+		for i := encoding.Size - 1; i >= 0; i-- {
+			bit := (encoding.Path >> uint(i)) & 1
+			fmt.Printf("%d", bit)
+		}
+
+		fmt.Printf(" (Size: %d, Raw Path: %d)\n", encoding.Size, encoding.Path)
 	}
 
-	decoded := decodeHuffman(asuint, metaR.Dict)
+	lookupTable := map[CharPathEncoding]byte{}
+	for key, val := range metaR.Dict {
+		lookupTable[val] = key
+	}
+
+	currPath := uint64(0)
+	var pathLen int
+	var decoded string
+
+	for binReader.Next() {
+		bit, err := binReader.ReadBit()
+		if err != nil {
+			return "", err
+		}
+
+		// e.g., if our bit is 1 and our currentPath is 0 currentPath = 1
+		currPath = (currPath << 1) | uint64(bit)
+		pathLen++
+
+		debugStr := ""
+		for i := 0; i < pathLen; i++ {
+			bit := (currPath >> uint(pathLen-1-i)) & 1
+			debugStr += fmt.Sprintf("%d", bit)
+		}
+
+		if char, ok := lookupTable[CharPathEncoding{Path: currPath, Size: pathLen}]; ok {
+			fmt.Println("debugStr:", debugStr)
+			fmt.Println("char found: ", string(char))
+			decoded += string(char)
+			pathLen = 0
+			currPath = 0
+		}
+	}
 
 	return decoded, nil
 }
@@ -377,10 +485,10 @@ type CompressedFileMetaData struct {
 	PaddingSize int                       `json:"ps"`
 }
 
-const META_SEPARATOR = "#"
+const META_SEPARATOR = '#'
 
 func main() {
-	filename := "data.txt"
+	filename := "data"
 
 	encodeStr := "hello world! From Emil."
 	encoded, charDict := huffmanEncoding(encodeStr)
