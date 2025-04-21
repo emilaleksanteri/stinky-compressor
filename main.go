@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -141,17 +142,14 @@ func encodeToTree(chars []CharEncoding) *Node {
 			pairs = append(pairs, curMainNode)
 			curMainNode = Node{}
 		} else if idx == len(chars)-1 && (curMainNode.Left == nil || curMainNode.Right == nil) {
-			prevLast := pairs[len(pairs)-1]
-			curMainNode.Right = &prevLast
-			curMainNode.Left = &node
-			pairs[len(pairs)-1] = curMainNode
+			pairs = append(pairs, node)
 		}
 	}
 
 	return buildTree(pairs)
 }
 
-func huffmanEncoding(input string) ([]CharPathEncoding, map[byte]CharPathEncoding) {
+func huffmanEncoding(input string, debugMode bool) ([]CharPathEncoding, map[byte]CharPathEncoding) {
 	asBts := []byte(input)
 
 	occurance := map[byte]int{}
@@ -184,7 +182,9 @@ func huffmanEncoding(input string) ([]CharPathEncoding, map[byte]CharPathEncodin
 	})
 
 	asTree := encodeToTree(asList)
-	//printTree(asTree, "", false)
+	if debugMode {
+		printTree(asTree, "", false)
+	}
 	charDict := map[byte]CharPathEncoding{}
 	treeToDict(asTree, charDict, &Path{})
 
@@ -239,7 +239,6 @@ func writeCompressionToFile(bits []CharPathEncoding, dict map[byte]CharPathEncod
 	if err != nil {
 		return fmt.Errorf("failed to flush bits: %+v", err)
 	}
-
 
 	metadata := CompressedFileMetaData{
 		EncodedLen:  binBuf.Len(),
@@ -375,7 +374,13 @@ func (b *BitReader) ReadBit() (byte, error) {
 		buf := make([]byte, 1)
 		_, err := b.reader.Read(buf)
 		if err != nil {
-			return 0, err
+			switch {
+			case errors.Is(err, io.EOF):
+				b.finished = true
+				return 0, nil
+			default:
+				return 0, err
+			}
 		}
 
 		b.buffer = buf[0]
@@ -460,7 +465,7 @@ func decodeCompressedFile(filename string) (string, error) {
 	for binReader.Next() {
 		bit, err := binReader.ReadBit()
 		if err != nil {
-			return "", err
+			return "", fmt.Errorf("read bit: %+v", err)
 		}
 
 		// e.g., if our bit is 1 and our currentPath is 0 currentPath = 1
@@ -486,10 +491,10 @@ type CompressedFileMetaData struct {
 const META_SEPARATOR = '#'
 
 func main() {
-	filename := "data"
+	filename := "data-big"
 
-	encodeStr := "hello world! From Emil."
-	encoded, charDict := huffmanEncoding(encodeStr)
+	encodeStr := "The ancient oak tree stood as a silent sentinel at the edge of the meadow, its gnarled branches reaching skyward like arthritic fingers. Generation after generation had sought shelter beneath its broad canopy, from summer picnics to winter storms. Children had climbed its sturdy limbs, lovers had carved their initials into its weathered bark, and birds had built countless nests among its leaves. Through drought and flood, through war and peace, the tree remained a living testament to resilience and time. Locals claimed it was over three hundred years old, though no one knew for certain. What was known, however, was that the oak had become more than just a tree; it had become a landmark, a meeting place, a character in the story of the town itself."
+	encoded, charDict := huffmanEncoding(encodeStr, true)
 
 	err := writeCompressionToFile(encoded, charDict, filename)
 	if err != nil {
@@ -501,7 +506,12 @@ func main() {
 		panic(err)
 	}
 
-	fmt.Printf("decoded: %s\n", decoded)
-	fmt.Println(len(decoded))
-
+	fmt.Printf("input:\n%s\n", encodeStr)
+	fmt.Printf("decoded:\n%s\n", decoded)
+	fmt.Printf("are equal: %v\n", encodeStr == decoded)
+	fmt.Println(len(decoded), len(encodeStr))
+	err = os.Remove(filename)
+	if err != nil {
+		panic(fmt.Sprintf("failed to delete file: %+v", err))
+	}
 }
