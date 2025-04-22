@@ -42,7 +42,7 @@ func TestCanEncodeAndDecodeFromFile(t *testing.T) {
 				t.Fatalf("writeCompressionToFile: %+v", err)
 			}
 
-			decoded, err := decodeCompressedFile(testFileName)
+			decoded, err := decodeCompressedFile(testFileName, false)
 			if err != nil {
 				t.Fatalf("decodeCompressedFile: %+v", err)
 			}

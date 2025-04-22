@@ -10,17 +10,17 @@ import (
 	"slices"
 )
 
-func printTree(node *Node, prefix string, isLeft bool) {
+func printTree(node *Node, prefix string, isLeft bool, isFirst bool) {
 	if node == nil {
 		return
 	}
 
-	if !isLeft {
-		fmt.Print(prefix + "└─R-")
-		prefix += "   "
-	} else {
+	if isLeft && !isFirst {
 		fmt.Print(prefix + "├─L-")
 		prefix += "│  "
+	} else if !isLeft && !isFirst {
+		fmt.Print(prefix + "└─R-")
+		prefix += "   "
 	}
 
 	if node.Char == 0 {
@@ -29,8 +29,8 @@ func printTree(node *Node, prefix string, isLeft bool) {
 		fmt.Printf("%c:%d\n", node.Char, node.Freq)
 	}
 
-	printTree(node.Left, prefix, true)
-	printTree(node.Right, prefix, false)
+	printTree(node.Left, prefix, true, false)
+	printTree(node.Right, prefix, false, false)
 }
 
 type Path struct {
@@ -66,6 +66,7 @@ func treeToDict(node *Node, dict map[byte]CharPathEncoding, path *Path) {
 		dict[node.Char] = CharPathEncoding{
 			Path: path.path,
 			Size: path.depth,
+			Freq: node.Freq,
 		}
 	}
 
@@ -92,8 +93,155 @@ type CharEncoding struct {
 }
 
 type CharPathEncoding struct {
-	Path uint64 `json:"p"`
-	Size int    `json:"s"`
+	Path     uint64 `json:"-"`
+	PathMeta string `json:"p"`
+	Size     int    `json:"s"`
+	Freq     int    `json:"f"`
+}
+
+func (c *CharPathEncoding) MakeSafePathMeta() {
+	binStr := ""
+	for pos := c.Size - 1; pos >= 0; pos-- {
+		bit := (c.Path >> uint(pos)) & 1
+		if bit == 0 {
+			binStr += "0"
+		} else {
+			binStr += "1"
+		}
+	}
+
+	c.PathMeta = binStr
+}
+func (c *CharPathEncoding) DecodeSafePathMetaToPath() {
+	var bin uint64
+	for _, char := range c.PathMeta {
+		bin <<= 1 // shift by 1
+		if char == '1' {
+			bin |= 1 // flip 0 to 1
+		}
+	}
+
+	c.Path = bin
+}
+
+func treeFromDict(dict map[string]CharPathEncoding) *Node {
+	nodes := []Node{}
+	for char, enc := range dict {
+		nodes = append(nodes, Node{
+			Char: []byte(char)[0],
+			Freq: enc.Freq,
+		})
+	}
+
+	/*
+		Think what can be done is first sort by path where longest paths come first
+		then we just build, if the last bit of the path is 0 it goes to the parent nodes left, else to the right
+		and do this till all the nodes are made into the tree
+
+		then to triverse we just travel until we find a letter, if nothing found in path then we must not have a char yet
+
+	*/
+
+	slices.SortFunc(nodes, func(a, b Node) int {
+		aEnc := dict[string(a.Char)]
+		bEnc := dict[string(b.Char)]
+
+		if aEnc.Size > bEnc.Size {
+			return -1
+		}
+
+		if aEnc.Size < bEnc.Size {
+			return 1
+		}
+
+		return 0
+	})
+
+	// Since first 4 nodes will all have the same size (being part of the last big node), they have to be sorted by the last 2 bits of their path
+	// 11 ending means that it will be the absolute last char in our tree and 00 means it will be the first one out of the 4 last ones
+	// since we are building the tree from last node to first node, the absolute last needs to be in the front of the node list etc etc
+	firstFour := nodes[:4]
+
+	codeCompMap := map[uint64]int{
+		0b11: 4,
+		0b10: 3,
+		0b01: 2,
+		0b00: 1,
+	}
+
+	slices.SortFunc(firstFour, func(a, b Node) int {
+		aEnc := dict[string(a.Char)]
+		mask := uint64(3)
+		aLastBts := aEnc.Path & mask
+
+		bEnc := dict[string(b.Char)]
+		bLastBts := bEnc.Path & mask
+
+		aScore := codeCompMap[aLastBts]
+		bScore := codeCompMap[bLastBts]
+
+		if aScore > bScore {
+			return -1
+		}
+
+		if aScore < bScore {
+			return 1
+		}
+
+		return 0
+	})
+
+	for idx, node := range firstFour {
+		nodes[idx] = node
+	}
+
+	currNode := Node{}
+	currAccNode := Node{}
+	hasRemainingNonPair := false
+
+	for idx, node := range nodes {
+		lastBit := (dict[string(node.Char)].Path >> uint(0)) & 1
+		if lastBit == 0 {
+			currAccNode.Left = &node
+		} else {
+			currAccNode.Right = &node
+		}
+
+		if currAccNode.Left != nil && currAccNode.Right != nil {
+			currAccNode.Freq = currAccNode.Left.Freq + currAccNode.Right.Freq
+
+			if currNode.Right == nil {
+				saved := currAccNode
+				currNode.Right = &saved
+				currAccNode = Node{}
+			} else if currNode.Left == nil {
+				saved := currAccNode
+				currNode.Left = &saved
+				currAccNode = Node{}
+			}
+
+			if currNode.Left != nil && currNode.Right != nil {
+				saved := currNode
+				saved.Freq = saved.Left.Freq + saved.Right.Freq
+
+				currNode = Node{}
+				currNode.Right = &saved
+			}
+
+		} else if idx == len(nodes)-1 && currNode.Left == nil && (currAccNode.Left == nil || currAccNode.Right == nil) {
+			currNode.Left = &node
+			currNode.Freq = currNode.Left.Freq + currNode.Right.Freq
+			hasRemainingNonPair = true
+
+		}
+
+	}
+
+	if hasRemainingNonPair {
+		return &currNode
+	}
+
+	return currNode.Right
 }
 
 func buildTree(pairs []Node) *Node {
@@ -183,7 +331,7 @@ func huffmanEncoding(input string, debugMode bool) ([]CharPathEncoding, map[byte
 
 	asTree := encodeToTree(asList)
 	if debugMode {
-		printTree(asTree, "", false)
+		printTree(asTree, "", false, true)
 	}
 	charDict := map[byte]CharPathEncoding{}
 	treeToDict(asTree, charDict, &Path{})
@@ -240,9 +388,15 @@ func writeCompressionToFile(bits []CharPathEncoding, dict map[byte]CharPathEncod
 		return fmt.Errorf("failed to flush bits: %+v", err)
 	}
 
+	metaMap := map[string]CharPathEncoding{}
+	for ch, enc := range dict {
+		enc.MakeSafePathMeta()
+		metaMap[string(ch)] = enc
+	}
+
 	metadata := CompressedFileMetaData{
 		EncodedLen:  binBuf.Len(),
-		Dict:        dict,
+		Dict:        metaMap,
 		PaddingSize: padding,
 	}
 
@@ -415,7 +569,7 @@ func (b *BitReader) ReadBit() (byte, error) {
 	return bit, nil
 }
 
-func decodeCompressedFile(filename string) (string, error) {
+func decodeCompressedFile(filename string, debug bool) (string, error) {
 	file, err := os.Open(filename)
 	if err != nil {
 		return "", fmt.Errorf("failed to open file: %+v", err)
@@ -428,20 +582,19 @@ func decodeCompressedFile(filename string) (string, error) {
 	}
 
 	metaBtsRead := []byte{}
-	binData := []byte{}
 	readMeta := true
-	for _, bt := range content {
+	metaEndsIdx := 0
+
+	for idx, bt := range content {
 		if bt == META_SEPARATOR {
 			readMeta = false
-			continue
+			metaEndsIdx = idx + 1
+			break
 		}
 
 		if readMeta {
 			metaBtsRead = append(metaBtsRead, bt)
-		} else {
-			binData = append(binData, bt)
 		}
-
 	}
 
 	metaR := CompressedFileMetaData{}
@@ -450,17 +603,35 @@ func decodeCompressedFile(filename string) (string, error) {
 		return "", fmt.Errorf("failed to unmarshal meta bytes: %+v", err)
 	}
 
+	binData := make([]byte, metaR.EncodedLen)
+	contentLen := len(content)
+	binDataIdx := 0
+	for {
+		if metaEndsIdx == contentLen {
+			break
+		}
+
+		binData[binDataIdx] = content[metaEndsIdx]
+		binDataIdx++
+		metaEndsIdx++
+	}
+
+	for ch, enc := range metaR.Dict {
+		enc.DecodeSafePathMetaToPath()
+		metaR.Dict[ch] = enc
+	}
+
 	binBuf := bytes.NewBuffer(binData)
 	binReader := newBitReader(binBuf, int64(metaR.EncodedLen), metaR.PaddingSize)
 
-	lookupTable := map[CharPathEncoding]byte{}
-	for key, val := range metaR.Dict {
-		lookupTable[val] = key
+	tree := treeFromDict(metaR.Dict)
+	if debug {
+		printTree(tree, "", false, true)
 	}
 
-	currPath := uint64(0)
-	var pathLen int
 	var decoded string
+
+	head := tree
 
 	for binReader.Next() {
 		bit, err := binReader.ReadBit()
@@ -468,14 +639,15 @@ func decodeCompressedFile(filename string) (string, error) {
 			return "", fmt.Errorf("read bit: %+v", err)
 		}
 
-		// e.g., if our bit is 1 and our currentPath is 0 currentPath = 1
-		currPath = (currPath << 1) | uint64(bit)
-		pathLen++
+		if bit == 1 {
+			head = head.Right
+		} else {
+			head = head.Left
+		}
 
-		if char, ok := lookupTable[CharPathEncoding{Path: currPath, Size: pathLen}]; ok {
-			decoded += string(char)
-			pathLen = 0
-			currPath = 0
+		if head.Left == nil && head.Right == nil {
+			decoded += string(head.Char)
+			head = tree
 		}
 	}
 
@@ -483,9 +655,9 @@ func decodeCompressedFile(filename string) (string, error) {
 }
 
 type CompressedFileMetaData struct {
-	EncodedLen  int                       `json:"e"`
-	Dict        map[byte]CharPathEncoding `json:"d"`
-	PaddingSize int                       `json:"ps"`
+	EncodedLen  int                         `json:"e"`
+	Dict        map[string]CharPathEncoding `json:"d"`
+	PaddingSize int                         `json:"ps"`
 }
 
 const META_SEPARATOR = '#'
@@ -493,7 +665,7 @@ const META_SEPARATOR = '#'
 func main() {
 	filename := "data-big"
 
-	encodeStr := "The ancient oak tree stood as a silent sentinel at the edge of the meadow, its gnarled branches reaching skyward like arthritic fingers. Generation after generation had sought shelter beneath its broad canopy, from summer picnics to winter storms. Children had climbed its sturdy limbs, lovers had carved their initials into its weathered bark, and birds had built countless nests among its leaves. Through drought and flood, through war and peace, the tree remained a living testament to resilience and time. Locals claimed it was over three hundred years old, though no one knew for certain. What was known, however, was that the oak had become more than just a tree; it had become a landmark, a meeting place, a character in the story of the town itself."
+	encodeStr := "The ancient oak tree stood as a silent sentinel at the edge of the meadow, its gnarled branches reaching skyward like arthritic fingers. Generation after generation had sought shelter beneath its broad canopy, from summer picnics to winter storms. Children had climbed its sturdy limbs, lovers had carved their initials into its weathered bark, and birds had built countless nests among its leaves. Through drought and flood, through war and peace, the tree remained a living testament to resilience and time. Locals claimed it was over three hundred years old, though no one knew for certain. What was known, however, was that the oak had become more than just a tree; it had become a landmark, a meeting place, a character in the story of the town itself. Bobs burgers and fries."
 	encoded, charDict := huffmanEncoding(encodeStr, true)
 
 	err := writeCompressionToFile(encoded, charDict, filename)
@@ -501,15 +673,24 @@ func main() {
 		panic(err)
 	}
 
-	decoded, err := decodeCompressedFile(filename)
+	decoded, err := decodeCompressedFile(filename, true)
 	if err != nil {
 		panic(err)
 	}
 
-	fmt.Printf("input:\n%s\n", encodeStr)
-	fmt.Printf("decoded:\n%s\n", decoded)
+	fmt.Printf("input:\n'%s'\n", encodeStr)
+	fmt.Printf("decoded:\n'%s'\n", decoded)
 	fmt.Printf("are equal: %v\n", encodeStr == decoded)
 	fmt.Println(len(decoded), len(encodeStr))
+	if len(decoded) == len(encodeStr) {
+		for idx, char := range encodeStr {
+			match := decoded[idx]
+			if match != byte(char) {
+				fmt.Printf("mismatched char at idx %d: '%s', wanted '%s'\n", idx, string(match), string(byte(char)))
+			}
+		}
+	}
+
 	err = os.Remove(filename)
 	if err != nil {
 		panic(fmt.Sprintf("failed to delete file: %+v", err))
