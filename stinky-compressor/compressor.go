@@ -4,9 +4,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
+	sCError "stinky-compression/error"
+	sCFile "stinky-compression/file"
 	"stinky-compression/huffman"
 	"stinky-compression/reader"
 	"stinky-compression/writer"
@@ -14,22 +15,8 @@ import (
 )
 
 const (
-	COMPRESSOR_ERROR_SEVERITY_ERROR = "error"
-	COMPRESSOR_ERROR_SEVERITY_INFO  = "info"
-)
-
-type CompressorError struct {
-	Severity string
-	Message  string
-}
-
-func (ce *CompressorError) Error() string {
-	return fmt.Sprintf("(%s) %s", ce.Severity, ce.Message)
-}
-
-const (
 	META_SEPARATOR            = '#'
-	COMPRESSED_FILE_EXTENSION = "sinkc"
+	COMPRESSED_FILE_EXTENSION = "stinkc"
 )
 
 type CompressedFileMetaData struct {
@@ -42,19 +29,6 @@ func (cfm *CompressedFileMetaData) DecodeEncodingTable() {
 	dict := cfm.Dict
 	dict.DecodeSafePathMetaFromTable()
 	cfm.Dict = dict
-}
-
-func fileExists(filename string) bool {
-	_, err := os.Stat(filename)
-	if err == nil {
-		return true
-	}
-
-	if os.IsNotExist(err) {
-		return false
-	}
-
-	return false
 }
 
 func deleteFile(filename string) error {
@@ -74,7 +48,7 @@ func makeCompressedFileName(fromFileName string) string {
 
 	rawFileName := filenameSplit[0]
 
-	return fmt.Sprintf("%s%s", rawFileName, COMPRESSED_FILE_EXTENSION)
+	return fmt.Sprintf("%s.%s", rawFileName, COMPRESSED_FILE_EXTENSION)
 }
 
 func WriteCompressionToFile(input []byte, filename string, removeOldFile, debug bool) (string, error) {
@@ -82,24 +56,18 @@ func WriteCompressionToFile(input []byte, filename string, removeOldFile, debug 
 
 	compressedFileName := makeCompressedFileName(filename)
 
-	if !fileExists(compressedFileName) {
-		fileC, err := os.Create(compressedFileName)
-		if err != nil {
-			return compressedFileName, &CompressorError{
-				Severity: COMPRESSOR_ERROR_SEVERITY_ERROR,
-				Message:  fmt.Sprintf("failed to create file: %+v", err),
-			}
+	if !sCFile.FileExists(compressedFileName) {
+		if err := sCFile.CreateFile(compressedFileName); err != nil {
+			return compressedFileName, err
 		}
-		fileC.Close()
+
 	}
 
-	file, err := os.OpenFile(compressedFileName, os.O_WRONLY, 0777)
+	file, err := sCFile.OpenFileWithWritePermissions(compressedFileName)
 	if err != nil {
-		return compressedFileName, &CompressorError{
-			Severity: COMPRESSOR_ERROR_SEVERITY_ERROR,
-			Message:  fmt.Sprintf("opening file failed: %+v", err),
-		}
+		return compressedFileName, err
 	}
+
 	defer file.Close()
 
 	buf := []byte{}
@@ -108,8 +76,8 @@ func WriteCompressionToFile(input []byte, filename string, removeOldFile, debug 
 	for _, enc := range encoded {
 		err := binWriter.WriteBits(enc.Path, enc.Size)
 		if err != nil {
-			return compressedFileName, &CompressorError{
-				Severity: COMPRESSOR_ERROR_SEVERITY_ERROR,
+			return compressedFileName, &sCError.CompressorError{
+				Severity: sCError.COMPRESSOR_ERROR_SEVERITY_ERROR,
 				Message:  fmt.Sprintf("failed to write bits: %+v", err),
 			}
 		}
@@ -118,8 +86,8 @@ func WriteCompressionToFile(input []byte, filename string, removeOldFile, debug 
 
 	padding, err := binWriter.Flush()
 	if err != nil {
-		return compressedFileName, &CompressorError{
-			Severity: COMPRESSOR_ERROR_SEVERITY_ERROR,
+		return compressedFileName, &sCError.CompressorError{
+			Severity: sCError.COMPRESSOR_ERROR_SEVERITY_ERROR,
 			Message:  fmt.Sprintf("failed to flush bits: %+v", err),
 		}
 	}
@@ -134,8 +102,8 @@ func WriteCompressionToFile(input []byte, filename string, removeOldFile, debug 
 
 	metaBts, err := json.Marshal(metadata)
 	if err != nil {
-		return compressedFileName, &CompressorError{
-			Severity: COMPRESSOR_ERROR_SEVERITY_ERROR,
+		return compressedFileName, &sCError.CompressorError{
+			Severity: sCError.COMPRESSOR_ERROR_SEVERITY_ERROR,
 			Message:  fmt.Sprintf("failed to marshal metadata: %+v", err),
 		}
 	}
@@ -143,16 +111,16 @@ func WriteCompressionToFile(input []byte, filename string, removeOldFile, debug 
 	metaBts = append(metaBts, byte(META_SEPARATOR))
 	_, err = file.Write(metaBts)
 	if err != nil {
-		return compressedFileName, &CompressorError{
-			Severity: COMPRESSOR_ERROR_SEVERITY_ERROR,
+		return compressedFileName, &sCError.CompressorError{
+			Severity: sCError.COMPRESSOR_ERROR_SEVERITY_ERROR,
 			Message:  fmt.Sprintf("failed to write meta bytes to file: %+v", err),
 		}
 	}
 
 	_, err = binBuf.WriteTo(file)
 	if err != nil {
-		return compressedFileName, &CompressorError{
-			Severity: COMPRESSOR_ERROR_SEVERITY_ERROR,
+		return compressedFileName, &sCError.CompressorError{
+			Severity: sCError.COMPRESSOR_ERROR_SEVERITY_ERROR,
 			Message:  fmt.Sprintf("failed to write bits to file: %+v", err),
 		}
 	}
@@ -160,9 +128,9 @@ func WriteCompressionToFile(input []byte, filename string, removeOldFile, debug 
 	if removeOldFile {
 		err := deleteFile(filename)
 		if err != nil {
-			return compressedFileName, &CompressorError{
-				Severity: COMPRESSOR_ERROR_SEVERITY_INFO,
-				Message:  fmt.Sprintf("(INFO) Compression was succesfull but old file could not be removed: %s", err.Error()),
+			return compressedFileName, &sCError.CompressorError{
+				Severity: sCError.COMPRESSOR_ERROR_SEVERITY_INFO,
+				Message:  fmt.Sprintf("Compression was succesfull but old file could not be removed: %s", err.Error()),
 			}
 		}
 	}
@@ -170,18 +138,7 @@ func WriteCompressionToFile(input []byte, filename string, removeOldFile, debug 
 	return compressedFileName, nil
 }
 
-func DecodeCompressedFile(filename string, debug bool) (string, error) {
-	file, err := os.Open(filename)
-	if err != nil {
-		return "", fmt.Errorf("failed to open file: %+v", err)
-	}
-	defer file.Close()
-
-	content, err := io.ReadAll(file)
-	if err != nil {
-		return "", fmt.Errorf("failed to read file: %+v", err)
-	}
-
+func DecodeCompressedFile(content []byte, debug bool) ([]byte, error) {
 	metaBtsRead := []byte{}
 	readMeta := true
 	metaEndsIdx := 0
@@ -199,9 +156,12 @@ func DecodeCompressedFile(filename string, debug bool) (string, error) {
 	}
 
 	metaR := CompressedFileMetaData{}
-	err = json.Unmarshal(metaBtsRead, &metaR)
+	err := json.Unmarshal(metaBtsRead, &metaR)
 	if err != nil {
-		return "", fmt.Errorf("failed to unmarshal meta bytes: %+v", err)
+		return nil, &sCError.CompressorError{
+			Severity: sCError.COMPRESSOR_ERROR_SEVERITY_ERROR,
+			Message:  fmt.Sprintf("failed to unmarshal meta bytes: %+v", err),
+		}
 	}
 
 	metaR.DecodeEncodingTable()
@@ -227,14 +187,17 @@ func DecodeCompressedFile(filename string, debug bool) (string, error) {
 		tree.DebugTree()
 	}
 
-	var decoded string
+	var decoded []byte
 
 	head := tree
 
 	for binReader.Next() {
 		bit, err := binReader.ReadBit()
 		if err != nil {
-			return "", fmt.Errorf("read bit: %+v", err)
+			return nil, &sCError.CompressorError{
+				Severity: sCError.COMPRESSOR_ERROR_SEVERITY_ERROR,
+				Message:  fmt.Sprintf("read bit: %+v", err),
+			}
 		}
 
 		if bit == reader.END_OF_READING {
@@ -248,7 +211,7 @@ func DecodeCompressedFile(filename string, debug bool) (string, error) {
 		}
 
 		if head.Left == nil && head.Right == nil {
-			decoded += string(head.Char)
+			decoded = append(decoded, head.Char)
 			head = tree
 		}
 	}

@@ -3,6 +3,7 @@ package stinkycompressor
 import (
 	"fmt"
 	"os"
+	"stinky-compression/file"
 	"testing"
 )
 
@@ -27,12 +28,17 @@ func TestCanEncodeAndDecodeFromFile(t *testing.T) {
 				t.Fatalf("writeCompressionToFile: %+v", err)
 			}
 
-			decoded, err := DecodeCompressedFile(compressedFileName, false)
+			compressedContent, err := file.ReadInputFile(compressedFileName)
+			if err != nil {
+				t.Fatalf("ReadInputFile: %+v", err)
+			}
+
+			decoded, err := DecodeCompressedFile(compressedContent, false)
 			if err != nil {
 				t.Fatalf("decodeCompressedFile: %+v", err)
 			}
 
-			if decoded != input {
+			if string(decoded) != input {
 				t.Fatalf("decoded message did not match input.\nWanted: %s\nGot: %s", input, decoded)
 			}
 		})

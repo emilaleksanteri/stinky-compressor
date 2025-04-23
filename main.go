@@ -1,44 +1,161 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"os"
+	sCError "stinky-compression/error"
+	"stinky-compression/file"
 	stinkycompressor "stinky-compression/stinky-compressor"
+	"time"
 )
 
+type config struct {
+	debug          bool
+	removeSrcFile  bool
+	decodeDestFile string
+	srcFile        string
+}
+
 func main() {
-	filename := "data-big"
-	debug := false
-	removeOldFile := false
+	var cfg config
+	flag.BoolVar(&cfg.debug, "debug", false, "Run Stinky-Compressor in debug mode")
+	flag.BoolVar(&cfg.removeSrcFile, "remove-src", false, "Remove source file after compression")
+	flag.StringVar(&cfg.decodeDestFile, "decode-dest", "", "Where to save decoded content")
+	flag.StringVar(&cfg.srcFile, "src", "", "Source file to compress")
+	flag.Parse()
 
-	encodeStr := "The ancient oak tree stood as a silent sentinel at the edge of the meadow, its gnarled branches reaching skyward like arthritic fingers. Generation after generation had sought shelter beneath its broad canopy, from summer picnics to winter storms. Children had climbed its sturdy limbs, lovers had carved their initials into its weathered bark, and birds had built countless nests among its leaves. Through drought and flood, through war and peace, the tree remained a living testament to resilience and time. Locals claimed it was over three hundred years old, though no one knew for certain. What was known, however, was that the oak had become more than just a tree; it had become a landmark, a meeting place, a character in the story of the town itself. Bobs burgers and fries."
-	bytes := []byte(encodeStr)
+	switch {
+	case flag.NArg() == 0:
+		if cfg.srcFile == "" {
+			err := &sCError.CompressorError{
+				Severity: sCError.COMPRESSOR_ERROR_SEVERITY_ERROR,
+				Message:  "Missing 'src' parameter",
+			}
 
-	compressedFileName, err := stinkycompressor.WriteCompressionToFile(bytes, filename, removeOldFile, debug)
-	if err != nil {
-		panic(err)
-	}
+			fmt.Printf("%s\n", err.Error())
+			os.Exit(1)
+		}
 
-	decoded, err := stinkycompressor.DecodeCompressedFile(compressedFileName, debug)
-	if err != nil {
-		panic(err)
-	}
+		fileContent, err := file.ReadInputFile(cfg.srcFile)
+		if err != nil {
+			fmt.Printf("%s\n", err.Error())
+			os.Exit(1)
+		}
 
-	fmt.Printf("input:\n'%s'\n", encodeStr)
-	fmt.Printf("decoded:\n'%s'\n", decoded)
-	fmt.Printf("are equal: %v\n", encodeStr == decoded)
-	fmt.Println(len(decoded), len(encodeStr))
-	if len(decoded) == len(encodeStr) {
-		for idx, char := range encodeStr {
-			match := decoded[idx]
-			if match != byte(char) {
-				fmt.Printf("mismatched char at idx %d: '%s', wanted '%s'\n", idx, string(match), string(byte(char)))
+		compTime := time.Now()
+		compressedFileName, err := stinkycompressor.WriteCompressionToFile(fileContent, cfg.srcFile, cfg.removeSrcFile, cfg.debug)
+		if err != nil {
+			panic(err)
+		}
+		compSince := time.Since(compTime)
+		fmt.Printf("(INFO) compression took: %s\n", compSince)
+		fmt.Printf("(INFO) Compressed file %s saved\n", compressedFileName)
+		os.Exit(0)
+	case flag.Arg(0) == "decode":
+		if cfg.decodeDestFile == "" {
+			err := &sCError.CompressorError{
+				Severity: sCError.COMPRESSOR_ERROR_SEVERITY_ERROR,
+				Message:  "Missing 'decode-dest' parameter",
+			}
+
+			fmt.Printf("%s\n", err.Error())
+			os.Exit(1)
+		}
+
+		if cfg.srcFile == "" {
+			err := &sCError.CompressorError{
+				Severity: sCError.COMPRESSOR_ERROR_SEVERITY_ERROR,
+				Message:  "Missing 'src' parameter",
+			}
+
+			fmt.Printf("%s\n", err.Error())
+			os.Exit(1)
+		}
+
+		compressedContent, err := file.ReadInputFile(cfg.srcFile)
+		if err != nil {
+			fmt.Printf("%s\n", err.Error())
+			os.Exit(1)
+		}
+
+		decTime := time.Now()
+		decoded, err := stinkycompressor.DecodeCompressedFile(compressedContent, cfg.debug)
+		if err != nil {
+			panic(err)
+		}
+		decSince := time.Since(decTime)
+		fmt.Printf("decode took: %s\n", decSince)
+
+		if !file.FileExists(cfg.decodeDestFile) {
+			err := file.CreateFile(cfg.decodeDestFile)
+			if err != nil {
+				fmt.Printf("%s\n", err.Error())
+				os.Exit(1)
 			}
 		}
-	}
 
-	err = os.Remove(compressedFileName)
-	if err != nil {
-		panic(fmt.Sprintf("failed to delete file: %+v", err))
+		fileToWrite, err := file.OpenFileWithWritePermissions(cfg.decodeDestFile)
+		if err != nil {
+			fmt.Printf("%s\n", err.Error())
+			os.Exit(1)
+		}
+		defer fileToWrite.Close()
+
+		_, err = fileToWrite.Write(decoded)
+		if err != nil {
+			err = &sCError.CompressorError{
+				Severity: sCError.COMPRESSOR_ERROR_SEVERITY_ERROR,
+				Message:  fmt.Sprintf("Failed to write decoded content to file: %+v", err),
+			}
+
+			fmt.Printf("%s\n", err)
+			os.Exit(1)
+		}
+
+		fmt.Printf("(INFO) Decoded content saved at %s\n", cfg.decodeDestFile)
+		os.Exit(0)
+
+	case flag.Arg(0) == "compare":
+		if cfg.decodeDestFile == "" {
+			err := &sCError.CompressorError{
+				Severity: sCError.COMPRESSOR_ERROR_SEVERITY_ERROR,
+				Message:  "Missing 'decode-dest' parameter",
+			}
+
+			fmt.Printf("%s\n", err.Error())
+			os.Exit(1)
+		}
+
+		if cfg.srcFile == "" {
+			err := &sCError.CompressorError{
+				Severity: sCError.COMPRESSOR_ERROR_SEVERITY_ERROR,
+				Message:  "Missing 'src' parameter",
+			}
+
+			fmt.Printf("%s\n", err.Error())
+			os.Exit(1)
+		}
+
+		inputContent, err := file.ReadInputFile(cfg.srcFile)
+		if err != nil {
+			fmt.Printf("%s\n", err)
+			os.Exit(1)
+		}
+
+		compContent, err := file.ReadInputFile(cfg.decodeDestFile)
+		if err != nil {
+			fmt.Printf("%s\n", err)
+			os.Exit(1)
+		}
+
+		if string(inputContent) != string(compContent) {
+			fmt.Println("decoded did not match encoded")
+			fmt.Printf("decoded len: %d, input len: %d\n", len(compContent), len(inputContent))
+			os.Exit(1)
+		}
+
+		fmt.Println("Files matched :)")
+		os.Exit(0)
 	}
 }
