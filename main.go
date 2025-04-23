@@ -522,7 +522,7 @@ func (b *BitReader) ReadBit() (byte, error) {
 	if b.bitsRemaining == 0 {
 		if b.totalBytesRead >= b.encodedSize {
 			b.finished = true
-			return 0, nil
+			return END_OF_READING, nil
 		}
 
 		buf := make([]byte, 1)
@@ -533,7 +533,7 @@ func (b *BitReader) ReadBit() (byte, error) {
 				b.finished = true
 				return 0, nil
 			default:
-				return 0, err
+				return END_OF_READING, err
 			}
 		}
 
@@ -550,7 +550,7 @@ func (b *BitReader) ReadBit() (byte, error) {
 			b.bitsRemaining -= b.paddingSize
 			if b.bitsRemaining <= 0 {
 				b.finished = true
-				return 0, nil
+				return END_OF_READING, nil
 			}
 		}
 	}
@@ -639,6 +639,10 @@ func decodeCompressedFile(filename string, debug bool) (string, error) {
 			return "", fmt.Errorf("read bit: %+v", err)
 		}
 
+		if bit == END_OF_READING {
+			continue
+		}
+
 		if bit == 1 {
 			head = head.Right
 		} else {
@@ -660,20 +664,24 @@ type CompressedFileMetaData struct {
 	PaddingSize int                         `json:"ps"`
 }
 
-const META_SEPARATOR = '#'
+const (
+	META_SEPARATOR = '#'
+	END_OF_READING = byte('f')
+)
 
 func main() {
 	filename := "data-big"
+	debug := false
 
 	encodeStr := "The ancient oak tree stood as a silent sentinel at the edge of the meadow, its gnarled branches reaching skyward like arthritic fingers. Generation after generation had sought shelter beneath its broad canopy, from summer picnics to winter storms. Children had climbed its sturdy limbs, lovers had carved their initials into its weathered bark, and birds had built countless nests among its leaves. Through drought and flood, through war and peace, the tree remained a living testament to resilience and time. Locals claimed it was over three hundred years old, though no one knew for certain. What was known, however, was that the oak had become more than just a tree; it had become a landmark, a meeting place, a character in the story of the town itself. Bobs burgers and fries."
-	encoded, charDict := huffmanEncoding(encodeStr, true)
+	encoded, charDict := huffmanEncoding(encodeStr, debug)
 
 	err := writeCompressionToFile(encoded, charDict, filename)
 	if err != nil {
 		panic(err)
 	}
 
-	decoded, err := decodeCompressedFile(filename, true)
+	decoded, err := decodeCompressedFile(filename, debug)
 	if err != nil {
 		panic(err)
 	}
