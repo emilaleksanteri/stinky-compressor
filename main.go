@@ -49,8 +49,8 @@ func main() {
 			panic(err)
 		}
 		compSince := time.Since(compTime)
-		fmt.Printf("(INFO) compression took: %s\n", compSince)
-		fmt.Printf("(INFO) Compressed file %s saved\n", compressedFileName)
+		fmt.Printf("(info) compression took: %s\n", compSince)
+		fmt.Printf("(info) Compressed file %s saved\n", compressedFileName)
 		os.Exit(0)
 	case flag.Arg(0) == "decode":
 		if cfg.decodeDestFile == "" {
@@ -85,7 +85,7 @@ func main() {
 			panic(err)
 		}
 		decSince := time.Since(decTime)
-		fmt.Printf("decode took: %s\n", decSince)
+		fmt.Printf("(info) decode took: %s\n", decSince)
 
 		if !file.FileExists(cfg.decodeDestFile) {
 			err := file.CreateFile(cfg.decodeDestFile)
@@ -113,7 +113,7 @@ func main() {
 			os.Exit(1)
 		}
 
-		fmt.Printf("(INFO) Decoded content saved at %s\n", cfg.decodeDestFile)
+		fmt.Printf("(info) Decoded content saved at %s\n", cfg.decodeDestFile)
 		os.Exit(0)
 
 	case flag.Arg(0) == "compare":
@@ -150,12 +150,12 @@ func main() {
 		}
 
 		if string(inputContent) != string(compContent) {
-			fmt.Println("decoded did not match encoded")
-			fmt.Printf("decoded len: %d, input len: %d\n", len(compContent), len(inputContent))
+			fmt.Println("(error) decoded did not match encoded")
+			fmt.Printf("(error) decoded len: %d, input len: %d\n", len(compContent), len(inputContent))
 			os.Exit(1)
 		}
 
-		fmt.Println("Files matched :)")
+		fmt.Println("(info) Files matched :)")
 		os.Exit(0)
 	}
 }

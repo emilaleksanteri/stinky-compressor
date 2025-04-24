@@ -34,7 +34,7 @@ func TestCanEncodeAndDecodeBinaryCorrectly(t *testing.T) {
 		t.Fatalf("failed to read input file: %s", err.Error())
 	}
 
-	encoded, dict := HuffmanEncoding(bts, true)
+	encoded, dict := HuffmanEncoding(bts, false)
 	decoded := DecodeCompressionFromTable(encoded, dict)
 
 	if len(decoded) != len(bts) {
