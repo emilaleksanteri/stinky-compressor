@@ -13,10 +13,10 @@ func printTree(node *Node, prefix string, isLeft bool, isFirst bool) {
 
 	if isLeft && !isFirst {
 		fmt.Print(prefix + "├─L-")
-		prefix += "│  "
+		prefix += "│ "
 	} else if !isLeft && !isFirst {
 		fmt.Print(prefix + "└─R-")
-		prefix += "   "
+		prefix += " "
 	}
 
 	if node.IsAccNode {
@@ -161,75 +161,6 @@ func (h *NodeHeap) Pop() interface{} {
 	*h = old[0 : size-1]
 
 	return toPop
-}
-
-type NodesList []Node
-
-func (nl *NodesList) Pop2() (Node, Node) {
-	saved := *nl
-	size := len(saved)
-	toPop1 := saved[0]
-	toPop2 := saved[1]
-
-	*nl = saved[2:size]
-	return toPop1, toPop2
-}
-
-func buildTreeFromNodes(nodes NodesList, head *Node) *Node {
-	if len(nodes) == 0 {
-		head.IsAccNode = true
-		head.Freq = head.Left.Freq + head.Right.Freq
-		return head
-	}
-
-	if head.Right != nil && head.Left != nil {
-		head.Freq = head.Left.Freq + head.Right.Freq
-		saved := head
-		head = &Node{
-			IsAccNode: true,
-			Right:     saved,
-		}
-
-		return buildTreeFromNodes(nodes, head)
-	}
-
-	if len(nodes) == 1 {
-		fmt.Println("one left")
-		if head.Left == nil {
-			head.Left = &Node{
-				Char: nodes[0].Char,
-				Freq: nodes[0].Freq,
-			}
-
-			return buildTreeFromNodes(NodesList{}, head)
-		}
-	}
-
-	node1, node2 := nodes.Pop2()
-	if head.Right == nil {
-		head.Right = &Node{
-			IsAccNode: true,
-			Right:     &node1,
-			Left:      &node2,
-			Freq:      node1.Freq + node2.Freq,
-		}
-
-		return buildTreeFromNodes(nodes, head)
-	}
-
-	if len(nodes) == 0 {
-		fmt.Printf("node1: %+v\n", node1)
-		fmt.Printf("node2: %+v\n", node2)
-	}
-
-	head.Left = &Node{
-		IsAccNode: true,
-		Right:     &node1,
-		Left:      &node2,
-		Freq:      node1.Freq + node2.Freq,
-	}
-
-	return buildTreeFromNodes(nodes, head)
 }
 
 func extractLenghts(node *Node, depth int, lenghts map[byte]int) {
