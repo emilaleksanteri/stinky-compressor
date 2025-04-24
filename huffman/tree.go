@@ -358,17 +358,19 @@ func HuffmanEncoding(input []byte, debugMode bool) ([]CharPathEncoding, Frequenc
 
 func DecodeCompressionFromTable(bits []CharPathEncoding, dict FrequencyTable) []byte {
 	tree := TreeFromFrequencies(dict)
-	charDict := EncodingTable{}
-	treeToDict(tree, charDict, &path{})
-
 	decoded := []byte{}
 	for _, bit := range bits {
-		for char, enc := range charDict {
-			if enc.Path == bit.Path {
-				decoded = append(decoded, char)
-				break
+		head := tree
+		for pos := bit.Size - 1; pos >= 0; pos-- {
+			b := (bit.Path >> uint(pos)) & 1
+			if b == 1 {
+				head = head.Right
+			} else {
+				head = head.Left
 			}
 		}
+
+		decoded = append(decoded, head.Char)
 	}
 
 	return decoded
