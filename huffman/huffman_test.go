@@ -2,6 +2,8 @@ package huffman
 
 import (
 	"fmt"
+	"reflect"
+	"stinky-compression/file"
 	"testing"
 )
 
@@ -15,9 +17,47 @@ func TestCanEncodeAndDecodeStringCorrectly(t *testing.T) {
 			encoded, dict := HuffmanEncoding(asBytes, false)
 			decoded := DecodeCompressionFromTable(encoded, dict)
 
-			if decoded != input {
-				t.Fatalf("decoded message did not match input.\nWanted: %s\nGot: %s", input, decoded)
+			if len(decoded) != len(asBytes) {
+				t.Fatalf("decoded bytes len did not match input bytes len, got %d, wanted %d", len(decoded), len(asBytes))
+			}
+
+			if string(decoded) != string(asBytes) {
+				t.Fatalf("decoded did not match input got\n%s\nwanted\n%s", string(decoded), string(asBytes))
 			}
 		})
 	}
+}
+
+func TestCanEncodeAndDecodeBinaryCorrectly(t *testing.T) {
+	bts, err := file.ReadInputFile("./testdata/input.jpeg")
+	if err != nil {
+		t.Fatalf("failed to read input file: %s", err.Error())
+	}
+
+	encoded, dict := HuffmanEncoding(bts, true)
+	decoded := DecodeCompressionFromTable(encoded, dict)
+
+	if len(decoded) != len(bts) {
+		t.Fatalf("decoded bytes len did not match input bytes len, got %d, wanted %d\n", len(decoded), len(bts))
+	}
+
+	deepEqual := reflect.DeepEqual(decoded, bts)
+	if !deepEqual {
+		numInEqual := 0
+		uniqueBts := map[byte]bool{}
+		for idx, bt := range bts {
+			if decoded[idx] != bt {
+				numInEqual += 1
+				uniqueBts[bt] = true
+			}
+		}
+
+		uniqueBytsList := []byte{}
+		for key := range uniqueBts {
+			uniqueBytsList = append(uniqueBytsList, key)
+		}
+
+		t.Fatalf("%d/%d of decoded bytes did not match input bts\n these bytes did not match %+v\n", numInEqual, len(decoded), uniqueBytsList)
+	}
+
 }

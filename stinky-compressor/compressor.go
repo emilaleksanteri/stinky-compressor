@@ -20,15 +20,10 @@ const (
 )
 
 type CompressedFileMetaData struct {
-	EncodedLen  int                   `json:"e"`
-	Dict        huffman.EncodingTable `json:"d"`
-	PaddingSize int                   `json:"ps"`
-}
-
-func (cfm *CompressedFileMetaData) DecodeEncodingTable() {
-	dict := cfm.Dict
-	dict.DecodeSafePathMetaFromTable()
-	cfm.Dict = dict
+	EncodedLen   int                    `json:"e"`
+	Dict         huffman.FrequencyTable `json:"d"`
+	PaddingSize  int                    `json:"ps"`
+	OriginalSize int64                  `json:"os"`
 }
 
 func deleteFile(filename string) error {
@@ -52,7 +47,7 @@ func makeCompressedFileName(fromFileName string) string {
 }
 
 func WriteCompressionToFile(input []byte, filename string, removeOldFile, debug bool) (string, error) {
-	encoded, dict := huffman.HuffmanEncoding(input, debug)
+	encoded, frequencyTable := huffman.HuffmanEncoding(input, debug)
 
 	compressedFileName := makeCompressedFileName(filename)
 
@@ -92,12 +87,11 @@ func WriteCompressionToFile(input []byte, filename string, removeOldFile, debug 
 		}
 	}
 
-	dict.MakeSafePathMetaForMetadata()
-
 	metadata := CompressedFileMetaData{
-		EncodedLen:  binBuf.Len(),
-		Dict:        dict,
-		PaddingSize: padding,
+		EncodedLen:   binBuf.Len(),
+		Dict:         frequencyTable,
+		PaddingSize:  padding,
+		OriginalSize: int64(len(input)),
 	}
 
 	metaBts, err := json.Marshal(metadata)
@@ -164,8 +158,6 @@ func DecodeCompressedFile(content []byte, debug bool) ([]byte, error) {
 		}
 	}
 
-	metaR.DecodeEncodingTable()
-
 	binData := make([]byte, metaR.EncodedLen)
 	contentLen := len(content)
 	binDataIdx := 0
@@ -182,14 +174,10 @@ func DecodeCompressedFile(content []byte, debug bool) ([]byte, error) {
 	binBuf := bytes.NewBuffer(binData)
 	binReader := reader.NewBitReader(binBuf, int64(metaR.EncodedLen), metaR.PaddingSize)
 
-	tree := huffman.TreeFromEncodingTable(metaR.Dict)
-	if debug {
-		tree.DebugTree()
-	}
-
-	var decoded []byte
-
+	tree := huffman.TreeFromFrequencies(metaR.Dict)
 	head := tree
+
+	decoded := []byte{}
 
 	for binReader.Next() {
 		bit, err := binReader.ReadBit()

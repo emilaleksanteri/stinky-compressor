@@ -1,6 +1,7 @@
 package huffman
 
 import (
+	"container/heap"
 	"fmt"
 	"slices"
 )
@@ -18,10 +19,10 @@ func printTree(node *Node, prefix string, isLeft bool, isFirst bool) {
 		prefix += "   "
 	}
 
-	if node.Char == 0 {
+	if node.IsAccNode {
 		fmt.Printf("(%d)\n", node.Freq)
 	} else {
-		fmt.Printf("%c:%d\n", node.Char, node.Freq)
+		fmt.Printf("%d:%d\n", node.Char, node.Freq)
 	}
 
 	printTree(node.Left, prefix, true, false)
@@ -80,10 +81,11 @@ func treeToDict(node *Node, dict EncodingTable, path *path) {
 }
 
 type Node struct {
-	Char  byte
-	Freq  int
-	Left  *Node
-	Right *Node
+	Char      byte
+	Freq      int
+	Left      *Node
+	Right     *Node
+	IsAccNode bool
 }
 
 type charEncoding struct {
@@ -98,141 +100,7 @@ type CharPathEncoding struct {
 	Freq     int    `json:"f"`
 }
 
-func (c *CharPathEncoding) makeSafePathMeta() {
-	binStr := ""
-	for pos := c.Size - 1; pos >= 0; pos-- {
-		bit := (c.Path >> uint(pos)) & 1
-		if bit == 0 {
-			binStr += "0"
-		} else {
-			binStr += "1"
-		}
-	}
-
-	c.PathMeta = binStr
-}
-func (c *CharPathEncoding) decodeSafePathMetaToPath() {
-	var bin uint64
-	for _, char := range c.PathMeta {
-		bin <<= 1 // shift by 1
-		if char == '1' {
-			bin |= 1 // flip 0 to 1
-		}
-	}
-
-	c.Path = bin
-}
-
-func TreeFromEncodingTable(dict EncodingTable) *Node {
-	nodes := []Node{}
-	for char, enc := range dict {
-		nodes = append(nodes, Node{
-			Char: char,
-			Freq: enc.Freq,
-		})
-	}
-
-	slices.SortFunc(nodes, func(a, b Node) int {
-		aEnc := dict[a.Char]
-		bEnc := dict[b.Char]
-
-		if aEnc.Size > bEnc.Size {
-			return -1
-		}
-
-		if aEnc.Size < bEnc.Size {
-			return 1
-		}
-
-		return 0
-	})
-
-	// Since first 4 nodes will all have the same size (being part of the last big node), they have to be sorted by the last 2 bits of their path
-	// 11 ending means that it will be the absolute last char in our tree and 00 means it will be the first one out of the 4 last ones
-	// since we are building the tree from last node to first node, the absolute last needs to be in the front of the node list etc etc
-	firstFour := nodes[:4]
-
-	codeCompMap := map[uint64]int{
-		0b11: 4,
-		0b10: 3,
-		0b01: 2,
-		0b00: 1,
-	}
-
-	slices.SortFunc(firstFour, func(a, b Node) int {
-		aEnc := dict[a.Char]
-		mask := uint64(3)
-		aLastBts := aEnc.Path & mask
-
-		bEnc := dict[b.Char]
-		bLastBts := bEnc.Path & mask
-
-		aScore := codeCompMap[aLastBts]
-		bScore := codeCompMap[bLastBts]
-
-		if aScore > bScore {
-			return -1
-		}
-
-		if aScore < bScore {
-			return 1
-		}
-
-		return 0
-	})
-
-	for idx, node := range firstFour {
-		nodes[idx] = node
-	}
-
-	currNode := Node{}
-	currAccNode := Node{}
-	hasRemainingNonPair := false
-
-	for idx, node := range nodes {
-		lastBit := (dict[node.Char].Path >> uint(0)) & 1
-		if lastBit == 0 {
-			currAccNode.Left = &node
-		} else {
-			currAccNode.Right = &node
-		}
-
-		if currAccNode.Left != nil && currAccNode.Right != nil {
-			currAccNode.Freq = currAccNode.Left.Freq + currAccNode.Right.Freq
-
-			if currNode.Right == nil {
-				saved := currAccNode
-				currNode.Right = &saved
-				currAccNode = Node{}
-			} else if currNode.Left == nil {
-				saved := currAccNode
-				currNode.Left = &saved
-				currAccNode = Node{}
-			}
-
-			if currNode.Left != nil && currNode.Right != nil {
-				saved := currNode
-				saved.Freq = saved.Left.Freq + saved.Right.Freq
-
-				currNode = Node{}
-				currNode.Right = &saved
-			}
-
-		} else if idx == len(nodes)-1 && currNode.Left == nil && (currAccNode.Left == nil || currAccNode.Right == nil) {
-			currNode.Left = &node
-			currNode.Freq = currNode.Left.Freq + currNode.Right.Freq
-			hasRemainingNonPair = true
-
-		}
-
-	}
-
-	if hasRemainingNonPair {
-		return &currNode
-	}
-
-	return currNode.Right
-}
+type FrequencyTable map[byte]int
 
 func buildTree(pairs []Node) *Node {
 	currHead := Node{}
@@ -259,36 +127,280 @@ func buildTree(pairs []Node) *Node {
 	return &currHead
 }
 
-func encodeToTree(chars []charEncoding) *Node {
-	pairs := []Node{}
+type NodeHeap []*Node
 
-	curMainNode := Node{}
-	for idx, char := range chars {
-		node := Node{
-			Char: char.Val,
-			Freq: char.Freq,
+func (h NodeHeap) Len() int { return len(h) }
+
+func (h NodeHeap) Less(i, j int) bool {
+	// freq comp
+	if h[i].Freq != h[j].Freq {
+		return h[i].Freq < h[j].Freq
+	}
+
+	// byte comp
+	if (h[i].Left == nil && h[i].Right == nil) && (h[j].Left == nil && h[j].Right == nil) {
+		return h[i].Char < h[j].Char
+	}
+
+	// idx comp
+	return i < j
+}
+
+func (h NodeHeap) Swap(i, j int) {
+	h[i], h[j] = h[j], h[i]
+}
+
+func (h *NodeHeap) Push(node interface{}) {
+	*h = append(*h, node.(*Node))
+}
+
+func (h *NodeHeap) Pop() interface{} {
+	old := *h
+	size := len(old)
+	toPop := old[size-1]
+	*h = old[0 : size-1]
+
+	return toPop
+}
+
+type NodesList []Node
+
+func (nl *NodesList) Pop2() (Node, Node) {
+	saved := *nl
+	size := len(saved)
+	toPop1 := saved[0]
+	toPop2 := saved[1]
+
+	*nl = saved[2:size]
+	return toPop1, toPop2
+}
+
+func buildTreeFromNodes(nodes NodesList, head *Node) *Node {
+	if len(nodes) == 0 {
+		head.IsAccNode = true
+		head.Freq = head.Left.Freq + head.Right.Freq
+		return head
+	}
+
+	if head.Right != nil && head.Left != nil {
+		head.Freq = head.Left.Freq + head.Right.Freq
+		saved := head
+		head = &Node{
+			IsAccNode: true,
+			Right:     saved,
 		}
 
-		if curMainNode.Right == nil {
-			curMainNode.Right = &node
-		} else {
-			curMainNode.Left = &node
-		}
+		return buildTreeFromNodes(nodes, head)
+	}
 
-		if curMainNode.Left != nil && curMainNode.Right != nil {
-			curMainNode.Freq = curMainNode.Left.Freq + curMainNode.Right.Freq
-			pairs = append(pairs, curMainNode)
-			curMainNode = Node{}
-		} else if idx == len(chars)-1 && (curMainNode.Left == nil || curMainNode.Right == nil) {
-			pairs = append(pairs, node)
+	if len(nodes) == 1 {
+		fmt.Println("one left")
+		if head.Left == nil {
+			head.Left = &Node{
+				Char: nodes[0].Char,
+				Freq: nodes[0].Freq,
+			}
+
+			return buildTreeFromNodes(NodesList{}, head)
 		}
 	}
 
-	return buildTree(pairs)
+	node1, node2 := nodes.Pop2()
+	if head.Right == nil {
+		head.Right = &Node{
+			IsAccNode: true,
+			Right:     &node1,
+			Left:      &node2,
+			Freq:      node1.Freq + node2.Freq,
+		}
+
+		return buildTreeFromNodes(nodes, head)
+	}
+
+	if len(nodes) == 0 {
+		fmt.Printf("node1: %+v\n", node1)
+		fmt.Printf("node2: %+v\n", node2)
+	}
+
+	head.Left = &Node{
+		IsAccNode: true,
+		Right:     &node1,
+		Left:      &node2,
+		Freq:      node1.Freq + node2.Freq,
+	}
+
+	return buildTreeFromNodes(nodes, head)
 }
 
-func HuffmanEncoding(input []byte, debugMode bool) ([]CharPathEncoding, EncodingTable) {
-	occurance := map[byte]int{}
+func extractLenghts(node *Node, depth int, lenghts map[byte]int) {
+	if node == nil {
+		return
+	}
+
+	if node.Left == nil && node.Right == nil {
+		lenghts[node.Char] = depth
+		return
+	}
+
+	extractLenghts(node.Left, depth+1, lenghts)
+	extractLenghts(node.Right, depth+1, lenghts)
+}
+
+func codeLengths(chars []charEncoding) map[byte]int {
+	nodes := make(NodeHeap, 0, len(chars))
+
+	for _, char := range chars {
+		nodes = append(nodes, &Node{
+			Char: char.Val,
+			Freq: char.Freq,
+		})
+	}
+
+	heap.Init(&nodes)
+
+	for nodes.Len() > 1 {
+		left := heap.Pop(&nodes).(*Node)
+		right := heap.Pop(&nodes).(*Node)
+
+		newNode := &Node{
+			Freq:  left.Freq + right.Freq,
+			Left:  left,
+			Right: right,
+		}
+
+		heap.Push(&nodes, newNode)
+	}
+
+	lengths := map[byte]int{}
+	if nodes.Len() > 0 {
+		root := heap.Pop(&nodes).(*Node)
+		extractLenghts(root, 0, lengths)
+	}
+
+	return lengths
+}
+
+type canonicalCodeSymbol struct {
+	symbol byte
+	length int
+}
+
+func genCanonicalCodes(lengths map[byte]int) map[byte]CharPathEncoding {
+	symbols := make([]canonicalCodeSymbol, 0, len(lengths))
+
+	for char, length := range lengths {
+		symbols = append(symbols, canonicalCodeSymbol{
+			symbol: char,
+			length: length,
+		})
+	}
+
+	slices.SortFunc(symbols, func(a, b canonicalCodeSymbol) int {
+		if a.length != b.length {
+			if a.length > b.length {
+				return 1
+			}
+
+			return -1
+		}
+
+		if a.symbol > b.symbol {
+			return 1
+		}
+
+		if a.symbol < b.symbol {
+			return -1
+		}
+
+		return 0
+	})
+
+	res := map[byte]CharPathEncoding{}
+	code := uint64(0)
+	prevLen := 0
+
+	for _, symb := range symbols {
+		if symb.length > prevLen {
+			code <<= uint(symb.length - prevLen)
+			prevLen = symb.length
+		}
+
+		res[symb.symbol] = CharPathEncoding{
+			Path: code,
+			Size: symb.length,
+			Freq: lengths[symb.symbol],
+		}
+
+		code++
+	}
+
+	return res
+}
+
+func buildCanonicalTree(codes map[byte]CharPathEncoding) *Node {
+	root := &Node{IsAccNode: true}
+
+	for sym, enc := range codes {
+		node := root
+		for pos := enc.Size - 1; pos >= 0; pos-- {
+			bit := (enc.Path >> uint(pos)) & 1
+			if bit == 1 {
+				if node.Right == nil {
+					node.Right = &Node{IsAccNode: true}
+				}
+				node = node.Right
+			} else {
+				if bit == 0 && node.Left == nil {
+					node.Left = &Node{IsAccNode: true}
+				}
+				node = node.Left
+			}
+		}
+
+		node.Char = sym
+		node.IsAccNode = false
+	}
+
+	return root
+}
+
+func TreeFromFrequencies(input FrequencyTable) *Node {
+	asList := []charEncoding{}
+
+	for key, val := range input {
+		asList = append(asList, charEncoding{
+			Val:  key,
+			Freq: val,
+		})
+	}
+
+	slices.SortFunc(asList, func(a, b charEncoding) int {
+		if a.Freq != b.Freq {
+			if a.Freq > b.Freq {
+				return 1
+			}
+
+			return -1
+		}
+
+		if a.Val > b.Val {
+			return 1
+		}
+
+		if a.Val < b.Val {
+			return -1
+		}
+
+		return 0
+	})
+
+	lengths := codeLengths(asList)
+	codes := genCanonicalCodes(lengths)
+	return buildCanonicalTree(codes)
+}
+
+func HuffmanEncoding(input []byte, debugMode bool) ([]CharPathEncoding, FrequencyTable) {
+	occurance := FrequencyTable{}
 	for _, bt := range input {
 		if _, ok := occurance[bt]; ok {
 			occurance[bt] += 1
@@ -297,27 +409,7 @@ func HuffmanEncoding(input []byte, debugMode bool) ([]CharPathEncoding, Encoding
 		}
 	}
 
-	asList := []charEncoding{}
-	for key, val := range occurance {
-		asList = append(asList, charEncoding{
-			Val:  key,
-			Freq: val,
-		})
-	}
-
-	slices.SortFunc(asList, func(a, b charEncoding) int {
-		if a.Freq > b.Freq {
-			return 1
-		}
-
-		if a.Freq < b.Freq {
-			return -1
-		}
-
-		return 0
-	})
-
-	asTree := encodeToTree(asList)
+	asTree := TreeFromFrequencies(occurance)
 	if debugMode {
 		asTree.DebugTree()
 	}
@@ -330,15 +422,19 @@ func HuffmanEncoding(input []byte, debugMode bool) ([]CharPathEncoding, Encoding
 		encoded = append(encoded, charDict[bt])
 	}
 
-	return encoded, charDict
+	return encoded, occurance
 }
 
-func DecodeCompressionFromTable(bits []CharPathEncoding, dict EncodingTable) string {
-	decoded := ""
-	for _, u := range bits {
-		for key, val := range dict {
-			if val.Path == u.Path {
-				decoded += string(key)
+func DecodeCompressionFromTable(bits []CharPathEncoding, dict FrequencyTable) []byte {
+	tree := TreeFromFrequencies(dict)
+	charDict := EncodingTable{}
+	treeToDict(tree, charDict, &path{})
+
+	decoded := []byte{}
+	for _, bit := range bits {
+		for char, enc := range charDict {
+			if enc.Path == bit.Path {
+				decoded = append(decoded, char)
 				break
 			}
 		}
@@ -348,25 +444,3 @@ func DecodeCompressionFromTable(bits []CharPathEncoding, dict EncodingTable) str
 }
 
 type EncodingTable map[byte]CharPathEncoding
-
-func (et *EncodingTable) MakeSafePathMetaForMetadata() {
-	dict := *et
-
-	for key, val := range dict {
-		val.makeSafePathMeta()
-		dict[key] = val
-	}
-
-	et = &dict
-}
-
-func (et *EncodingTable) DecodeSafePathMetaFromTable() {
-	dict := *et
-
-	for key, val := range dict {
-		val.decodeSafePathMetaToPath()
-		dict[key] = val
-	}
-
-	et = &dict
-}
