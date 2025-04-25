@@ -26,7 +26,8 @@ type CompressedFileMetaData struct {
 	EncodedLen    int64                               `protobuf:"varint,1,opt,name=EncodedLen,proto3" json:"EncodedLen,omitempty"`
 	PaddingSize   int32                               `protobuf:"varint,2,opt,name=PaddingSize,proto3" json:"PaddingSize,omitempty"`
 	OriginalSize  int64                               `protobuf:"varint,3,opt,name=OriginalSize,proto3" json:"OriginalSize,omitempty"`
-	Frequencies   []*CompressedFileMetaData_Frequency `protobuf:"bytes,4,rep,name=Frequencies,proto3" json:"Frequencies,omitempty"`
+	BwtIdx        int32                               `protobuf:"varint,4,opt,name=BwtIdx,proto3" json:"BwtIdx,omitempty"`
+	Frequencies   []*CompressedFileMetaData_Frequency `protobuf:"bytes,5,rep,name=Frequencies,proto3" json:"Frequencies,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -82,6 +83,13 @@ func (x *CompressedFileMetaData) GetOriginalSize() int64 {
 	return 0
 }
 
+func (x *CompressedFileMetaData) GetBwtIdx() int32 {
+	if x != nil {
+		return x.BwtIdx
+	}
+	return 0
+}
+
 func (x *CompressedFileMetaData) GetFrequencies() []*CompressedFileMetaData_Frequency {
 	if x != nil {
 		return x.Frequencies
@@ -92,7 +100,7 @@ func (x *CompressedFileMetaData) GetFrequencies() []*CompressedFileMetaData_Freq
 type CompressedFileMetaData_Frequency struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Char          []byte                 `protobuf:"bytes,1,opt,name=Char,proto3" json:"Char,omitempty"`
-	Frequency     int64                  `protobuf:"varint,2,opt,name=Frequency,proto3" json:"Frequency,omitempty"`
+	Frequency     int32                  `protobuf:"varint,2,opt,name=Frequency,proto3" json:"Frequency,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -134,7 +142,7 @@ func (x *CompressedFileMetaData_Frequency) GetChar() []byte {
 	return nil
 }
 
-func (x *CompressedFileMetaData_Frequency) GetFrequency() int64 {
+func (x *CompressedFileMetaData_Frequency) GetFrequency() int32 {
 	if x != nil {
 		return x.Frequency
 	}
@@ -145,17 +153,18 @@ var File_proto_file_metadata_proto protoreflect.FileDescriptor
 
 const file_proto_file_metadata_proto_rawDesc = "" +
 	"\n" +
-	"\x19proto/file-metadata.proto\x12\x05proto\"\x88\x02\n" +
+	"\x19proto/file-metadata.proto\x12\x05proto\"\xa0\x02\n" +
 	"\x16CompressedFileMetaData\x12\x1e\n" +
 	"\n" +
 	"EncodedLen\x18\x01 \x01(\x03R\n" +
 	"EncodedLen\x12 \n" +
 	"\vPaddingSize\x18\x02 \x01(\x05R\vPaddingSize\x12\"\n" +
-	"\fOriginalSize\x18\x03 \x01(\x03R\fOriginalSize\x12I\n" +
-	"\vFrequencies\x18\x04 \x03(\v2'.proto.CompressedFileMetaData.FrequencyR\vFrequencies\x1a=\n" +
+	"\fOriginalSize\x18\x03 \x01(\x03R\fOriginalSize\x12\x16\n" +
+	"\x06BwtIdx\x18\x04 \x01(\x05R\x06BwtIdx\x12I\n" +
+	"\vFrequencies\x18\x05 \x03(\v2'.proto.CompressedFileMetaData.FrequencyR\vFrequencies\x1a=\n" +
 	"\tFrequency\x12\x12\n" +
 	"\x04Char\x18\x01 \x01(\fR\x04Char\x12\x1c\n" +
-	"\tFrequency\x18\x02 \x01(\x03R\tFrequencyB\x12Z\x10proto/proto-datab\x06proto3"
+	"\tFrequency\x18\x02 \x01(\x05R\tFrequencyB\x12Z\x10proto/proto-datab\x06proto3"
 
 var (
 	file_proto_file_metadata_proto_rawDescOnce sync.Once

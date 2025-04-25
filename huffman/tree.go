@@ -4,6 +4,8 @@ import (
 	"container/heap"
 	"fmt"
 	"slices"
+	"stinky-compression/bwt"
+	"stinky-compression/mft"
 	proto_data "stinky-compression/proto/proto-data"
 )
 
@@ -108,7 +110,7 @@ func FrequencyTableToProto(table FrequencyTable) []*proto_data.CompressedFileMet
 	for key, val := range table {
 		protoTable = append(protoTable, &proto_data.CompressedFileMetaData_Frequency{
 			Char:      []byte{key},
-			Frequency: int64(val),
+			Frequency: int32(val),
 		})
 	}
 
@@ -345,9 +347,12 @@ func TreeFromFrequencies(input FrequencyTable) *Node {
 	return buildCanonicalTree(codes)
 }
 
-func HuffmanEncoding(input []byte, debugMode bool) ([]CharPathEncoding, FrequencyTable) {
+func HuffmanEncoding(input []byte, debugMode bool) ([]CharPathEncoding, FrequencyTable, int) {
+	bwtCoded, pIdx := bwt.Bwt(input)
+	mftCoded := mft.Mft(bwtCoded)
+
 	occurance := FrequencyTable{}
-	for _, bt := range input {
+	for _, bt := range mftCoded {
 		occurance[bt]++
 	}
 
@@ -360,14 +365,14 @@ func HuffmanEncoding(input []byte, debugMode bool) ([]CharPathEncoding, Frequenc
 	treeToDict(asTree, charDict, &path{})
 
 	encoded := []CharPathEncoding{}
-	for _, bt := range input {
+	for _, bt := range mftCoded {
 		encoded = append(encoded, charDict[bt])
 	}
 
-	return encoded, occurance
+	return encoded, occurance, pIdx
 }
 
-func DecodeCompressionFromTable(bits []CharPathEncoding, dict FrequencyTable) []byte {
+func DecodeCompressionFromTable(bits []CharPathEncoding, dict FrequencyTable, bwtIdx int) []byte {
 	tree := TreeFromFrequencies(dict)
 	decoded := []byte{}
 	for _, bit := range bits {
@@ -384,7 +389,10 @@ func DecodeCompressionFromTable(bits []CharPathEncoding, dict FrequencyTable) []
 		decoded = append(decoded, head.Char)
 	}
 
-	return decoded
+	mftDecodd := mft.DecodeMft(decoded)
+	bwtDecoded := bwt.DecodeBwt(mftDecodd, bwtIdx)
+
+	return bwtDecoded
 }
 
 type EncodingTable map[byte]CharPathEncoding

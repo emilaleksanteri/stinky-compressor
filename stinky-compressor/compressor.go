@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"stinky-compression/bwt"
 	sCError "stinky-compression/error"
 	sCFile "stinky-compression/file"
 	"stinky-compression/huffman"
+	"stinky-compression/mft"
 	proto_data "stinky-compression/proto/proto-data"
 	"stinky-compression/reader"
 	"stinky-compression/writer"
@@ -42,7 +44,7 @@ func makeCompressedFileName(fromFileName string) string {
 }
 
 func WriteCompressionToFile(input []byte, filename string, removeOldFile, debug bool) (string, error) {
-	encoded, frequencyTable := huffman.HuffmanEncoding(input, debug)
+	encoded, frequencyTable, bwtIdx := huffman.HuffmanEncoding(input, debug)
 
 	compressedFileName := makeCompressedFileName(filename)
 
@@ -87,6 +89,7 @@ func WriteCompressionToFile(input []byte, filename string, removeOldFile, debug 
 		PaddingSize:  int32(padding),
 		OriginalSize: int64(len(input)),
 		Frequencies:  huffman.FrequencyTableToProto(frequencyTable),
+		BwtIdx:       int32(bwtIdx),
 	}
 
 	metaBts, err := proto.Marshal(&metadata)
@@ -230,5 +233,8 @@ func DecodeCompressedFile(content []byte, debug bool) ([]byte, error) {
 		}
 	}
 
-	return decoded, nil
+	mftDecoded := mft.DecodeMft(decoded)
+	bwtDecoded := bwt.DecodeBwt(mftDecoded, int(metaR.BwtIdx))
+
+	return bwtDecoded, nil
 }
