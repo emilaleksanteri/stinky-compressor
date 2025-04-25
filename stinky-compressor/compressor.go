@@ -2,29 +2,24 @@ package stinkycompressor
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	sCError "stinky-compression/error"
 	sCFile "stinky-compression/file"
 	"stinky-compression/huffman"
+	proto_data "stinky-compression/proto/proto-data"
 	"stinky-compression/reader"
 	"stinky-compression/writer"
+	"strconv"
 	"strings"
+
+	"google.golang.org/protobuf/proto"
 )
 
 const (
-	META_SEPARATOR            = '#'
 	COMPRESSED_FILE_EXTENSION = "stinkc"
 )
-
-type CompressedFileMetaData struct {
-	EncodedLen   int                    `json:"e"`
-	Dict         huffman.FrequencyTable `json:"d"`
-	PaddingSize  int                    `json:"ps"`
-	OriginalSize int64                  `json:"os"`
-}
 
 func deleteFile(filename string) error {
 	return os.Remove(filename)
@@ -87,22 +82,32 @@ func WriteCompressionToFile(input []byte, filename string, removeOldFile, debug 
 		}
 	}
 
-	metadata := CompressedFileMetaData{
-		EncodedLen:   binBuf.Len(),
-		Dict:         frequencyTable,
-		PaddingSize:  padding,
+	metadata := proto_data.CompressedFileMetaData{
+		EncodedLen:   int64(binBuf.Len()),
+		PaddingSize:  int32(padding),
 		OriginalSize: int64(len(input)),
+		Frequencies:  huffman.FrequencyTableToProto(frequencyTable),
 	}
 
-	metaBts, err := json.Marshal(metadata)
+	metaBts, err := proto.Marshal(&metadata)
 	if err != nil {
 		return compressedFileName, &sCError.CompressorError{
 			Severity: sCError.COMPRESSOR_ERROR_SEVERITY_ERROR,
-			Message:  fmt.Sprintf("failed to marshal metadata: %+v", err),
+			Message:  fmt.Sprintf("failed to marshal proto: %+v", err),
 		}
 	}
 
-	metaBts = append(metaBts, byte(META_SEPARATOR))
+	metaBtsSize := len(metaBts)
+
+	_, err = file.Write([]byte(fmt.Sprintf("%d#", metaBtsSize)))
+	if err != nil {
+		return compressedFileName, &sCError.CompressorError{
+			Severity: sCError.COMPRESSOR_ERROR_SEVERITY_ERROR,
+			Message:  fmt.Sprintf("failed to write meta bytes size: %+v", err),
+		}
+
+	}
+
 	_, err = file.Write(metaBts)
 	if err != nil {
 		return compressedFileName, &sCError.CompressorError{
@@ -133,24 +138,46 @@ func WriteCompressionToFile(input []byte, filename string, removeOldFile, debug 
 }
 
 func DecodeCompressedFile(content []byte, debug bool) ([]byte, error) {
-	metaBtsRead := []byte{}
-	readMeta := true
 	metaEndsIdx := 0
+	metaStartIdx := 0
+	metaSize := 0
 
+	accSizeStr := ""
 	for idx, bt := range content {
-		if bt == META_SEPARATOR {
-			readMeta = false
-			metaEndsIdx = idx + 1
-			break
-		}
+		if bt != '#' {
+			accSizeStr += string(bt)
+		} else {
+			metaStartIdx = idx + 1
+			metaSizeAtoi, err := strconv.Atoi(accSizeStr)
+			if err != nil {
+				return nil, &sCError.CompressorError{
+					Severity: sCError.COMPRESSOR_ERROR_SEVERITY_ERROR,
+					Message:  fmt.Sprintf("failed to parse meta size: %+v", err),
+				}
+			}
 
-		if readMeta {
-			metaBtsRead = append(metaBtsRead, bt)
+			metaSize = metaSizeAtoi
+			break
 		}
 	}
 
-	metaR := CompressedFileMetaData{}
-	err := json.Unmarshal(metaBtsRead, &metaR)
+	metaBtsRead := make([]byte, metaSize)
+	currMetaRead := 0
+	metaIdx := 0
+	for {
+		if currMetaRead == metaSize {
+			metaEndsIdx = metaStartIdx
+			break
+		}
+
+		metaBtsRead[metaIdx] = content[metaStartIdx]
+		currMetaRead++
+		metaIdx++
+		metaStartIdx++
+	}
+
+	metaR := &proto_data.CompressedFileMetaData{}
+	err := proto.Unmarshal(metaBtsRead, metaR)
 	if err != nil {
 		return nil, &sCError.CompressorError{
 			Severity: sCError.COMPRESSOR_ERROR_SEVERITY_ERROR,
@@ -159,22 +186,21 @@ func DecodeCompressedFile(content []byte, debug bool) ([]byte, error) {
 	}
 
 	binData := make([]byte, metaR.EncodedLen)
-	contentLen := len(content)
 	binDataIdx := 0
-	for {
-		if metaEndsIdx == contentLen {
-			break
-		}
+	bytesRead := int64(0)
+	for bytesRead < metaR.EncodedLen {
 
 		binData[binDataIdx] = content[metaEndsIdx]
 		binDataIdx++
 		metaEndsIdx++
+		bytesRead++
 	}
 
 	binBuf := bytes.NewBuffer(binData)
-	binReader := reader.NewBitReader(binBuf, int64(metaR.EncodedLen), metaR.PaddingSize)
+	binReader := reader.NewBitReader(binBuf, metaR.GetEncodedLen(), int(metaR.GetPaddingSize()))
 
-	tree := huffman.TreeFromFrequencies(metaR.Dict)
+	frequencyTable := huffman.ProtoFrequenciesToFrequencyTable(metaR.GetFrequencies())
+	tree := huffman.TreeFromFrequencies(frequencyTable)
 	head := tree
 
 	decoded := []byte{}

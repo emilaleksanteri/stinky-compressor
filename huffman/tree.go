@@ -4,6 +4,7 @@ import (
 	"container/heap"
 	"fmt"
 	"slices"
+	proto_data "stinky-compression/proto/proto-data"
 )
 
 func printTree(node *Node, prefix string, isLeft bool, isFirst bool) {
@@ -94,37 +95,34 @@ type charEncoding struct {
 }
 
 type CharPathEncoding struct {
-	Path     uint64 `json:"-"`
-	PathMeta string `json:"p"`
-	Size     int    `json:"s"`
-	Freq     int    `json:"f"`
+	Path uint64
+	Size int
+	Freq int
 }
 
 type FrequencyTable map[byte]int
 
-func buildTree(pairs []Node) *Node {
-	currHead := Node{}
-	for idx, pair := range pairs {
-		if currHead.Right == nil {
-			currHead.Right = &pair
-		} else {
-			currHead.Left = &pair
-		}
+func FrequencyTableToProto(table FrequencyTable) []*proto_data.CompressedFileMetaData_Frequency {
+	protoTable := []*proto_data.CompressedFileMetaData_Frequency{}
 
-		if currHead.Right != nil && currHead.Left != nil {
-			currHead.Freq = currHead.Right.Freq + currHead.Left.Freq
-			if idx == len(pairs)-1 {
-				continue
-			}
-
-			saved := currHead
-			currHead = Node{}
-			currHead.Right = &saved
-		}
-
+	for key, val := range table {
+		protoTable = append(protoTable, &proto_data.CompressedFileMetaData_Frequency{
+			Char:      []byte{key},
+			Frequency: int64(val),
+		})
 	}
 
-	return &currHead
+	return protoTable
+}
+
+func ProtoFrequenciesToFrequencyTable(freqs []*proto_data.CompressedFileMetaData_Frequency) FrequencyTable {
+	table := FrequencyTable{}
+
+	for _, freq := range freqs {
+		table[freq.GetChar()[0]] = int(freq.GetFrequency())
+	}
+
+	return table
 }
 
 type NodeHeap []*Node
@@ -216,7 +214,7 @@ type canonicalCodeSymbol struct {
 	length int
 }
 
-func genCanonicalCodes(lengths map[byte]int) map[byte]CharPathEncoding {
+func genCanonicalCodes(lengths map[byte]int, freqT FrequencyTable) EncodingTable {
 	symbols := make([]canonicalCodeSymbol, 0, len(lengths))
 
 	for char, length := range lengths {
@@ -259,7 +257,7 @@ func genCanonicalCodes(lengths map[byte]int) map[byte]CharPathEncoding {
 		res[symb.symbol] = CharPathEncoding{
 			Path: code,
 			Size: symb.length,
-			Freq: lengths[symb.symbol],
+			Freq: freqT[symb.symbol],
 		}
 
 		code++
@@ -273,23 +271,40 @@ func buildCanonicalTree(codes map[byte]CharPathEncoding) *Node {
 
 	for sym, enc := range codes {
 		node := root
+		prevNode := root
 		for pos := enc.Size - 1; pos >= 0; pos-- {
 			bit := (enc.Path >> uint(pos)) & 1
 			if bit == 1 {
 				if node.Right == nil {
 					node.Right = &Node{IsAccNode: true}
 				}
+
+				if node.Right != nil && node.Left != nil {
+					node.Freq = node.Left.Freq + node.Right.Freq
+				}
+
+				prevNode = node
 				node = node.Right
 			} else {
 				if bit == 0 && node.Left == nil {
 					node.Left = &Node{IsAccNode: true}
 				}
+
+				if node.Right != nil && node.Left != nil {
+					node.Freq = node.Left.Freq + node.Right.Freq
+				}
+
+				prevNode = node
 				node = node.Left
 			}
 		}
 
 		node.Char = sym
+		node.Freq = enc.Freq
 		node.IsAccNode = false
+		if prevNode.Left != nil && prevNode.Right != nil {
+			prevNode.Freq = prevNode.Left.Freq + prevNode.Right.Freq
+		}
 	}
 
 	return root
@@ -326,18 +341,14 @@ func TreeFromFrequencies(input FrequencyTable) *Node {
 	})
 
 	lengths := codeLengths(asList)
-	codes := genCanonicalCodes(lengths)
+	codes := genCanonicalCodes(lengths, input)
 	return buildCanonicalTree(codes)
 }
 
 func HuffmanEncoding(input []byte, debugMode bool) ([]CharPathEncoding, FrequencyTable) {
 	occurance := FrequencyTable{}
 	for _, bt := range input {
-		if _, ok := occurance[bt]; ok {
-			occurance[bt] += 1
-		} else {
-			occurance[bt] = 1
-		}
+		occurance[bt]++
 	}
 
 	asTree := TreeFromFrequencies(occurance)

@@ -46,7 +46,8 @@ func main() {
 		compTime := time.Now()
 		compressedFileName, err := stinkycompressor.WriteCompressionToFile(fileContent, cfg.srcFile, cfg.removeSrcFile, cfg.debug)
 		if err != nil {
-			panic(err)
+			fmt.Printf("%s\n", err.Error())
+			os.Exit(1)
 		}
 		compSince := time.Since(compTime)
 		fmt.Printf("(info) compression took: %s\n", compSince)
@@ -80,9 +81,10 @@ func main() {
 		}
 
 		decTime := time.Now()
-		decoded, err := stinkycompressor.DecodeCompressedFile(compressedContent, cfg.debug)
+		decoded, err := stinkycompressor.DecodeCompressedFile(compressedContent, true)
 		if err != nil {
-			panic(err)
+			fmt.Printf("%s\n", err.Error())
+			os.Exit(1)
 		}
 		decSince := time.Since(decTime)
 		fmt.Printf("(info) decode took: %s\n", decSince)

@@ -1,0 +1,17 @@
+syntax = "proto3";
+package proto;
+
+option go_package = "proto/proto-data";
+
+message CompressedFileMetaData {
+	int64 EncodedLen = 1;
+	int32 PaddingSize = 2;
+	int64 OriginalSize = 3;
+
+	message Frequency {
+		bytes Char = 1;
+		int64 Frequency = 2;
+	}
+
+	repeated Frequency Frequencies = 4;
+}
