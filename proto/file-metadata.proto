@@ -15,4 +15,6 @@ message CompressedFileMetaData {
 	}
 
 	repeated Frequency Frequencies = 5;
+
+	repeated int32 RleDict = 6;
 }

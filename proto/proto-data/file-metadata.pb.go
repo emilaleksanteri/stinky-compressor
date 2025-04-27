@@ -28,6 +28,7 @@ type CompressedFileMetaData struct {
 	OriginalSize  int64                               `protobuf:"varint,3,opt,name=OriginalSize,proto3" json:"OriginalSize,omitempty"`
 	BwtIdx        int32                               `protobuf:"varint,4,opt,name=BwtIdx,proto3" json:"BwtIdx,omitempty"`
 	Frequencies   []*CompressedFileMetaData_Frequency `protobuf:"bytes,5,rep,name=Frequencies,proto3" json:"Frequencies,omitempty"`
+	RleDict       []int32                             `protobuf:"varint,6,rep,packed,name=RleDict,proto3" json:"RleDict,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -97,6 +98,13 @@ func (x *CompressedFileMetaData) GetFrequencies() []*CompressedFileMetaData_Freq
 	return nil
 }
 
+func (x *CompressedFileMetaData) GetRleDict() []int32 {
+	if x != nil {
+		return x.RleDict
+	}
+	return nil
+}
+
 type CompressedFileMetaData_Frequency struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Char          []byte                 `protobuf:"bytes,1,opt,name=Char,proto3" json:"Char,omitempty"`
@@ -153,7 +161,7 @@ var File_proto_file_metadata_proto protoreflect.FileDescriptor
 
 const file_proto_file_metadata_proto_rawDesc = "" +
 	"\n" +
-	"\x19proto/file-metadata.proto\x12\x05proto\"\xa0\x02\n" +
+	"\x19proto/file-metadata.proto\x12\x05proto\"\xba\x02\n" +
 	"\x16CompressedFileMetaData\x12\x1e\n" +
 	"\n" +
 	"EncodedLen\x18\x01 \x01(\x03R\n" +
@@ -161,7 +169,8 @@ const file_proto_file_metadata_proto_rawDesc = "" +
 	"\vPaddingSize\x18\x02 \x01(\x05R\vPaddingSize\x12\"\n" +
 	"\fOriginalSize\x18\x03 \x01(\x03R\fOriginalSize\x12\x16\n" +
 	"\x06BwtIdx\x18\x04 \x01(\x05R\x06BwtIdx\x12I\n" +
-	"\vFrequencies\x18\x05 \x03(\v2'.proto.CompressedFileMetaData.FrequencyR\vFrequencies\x1a=\n" +
+	"\vFrequencies\x18\x05 \x03(\v2'.proto.CompressedFileMetaData.FrequencyR\vFrequencies\x12\x18\n" +
+	"\aRleDict\x18\x06 \x03(\x05R\aRleDict\x1a=\n" +
 	"\tFrequency\x12\x12\n" +
 	"\x04Char\x18\x01 \x01(\fR\x04Char\x12\x1c\n" +
 	"\tFrequency\x18\x02 \x01(\x05R\tFrequencyB\x12Z\x10proto/proto-datab\x06proto3"

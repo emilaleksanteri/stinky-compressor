@@ -7,6 +7,7 @@ import (
 	"stinky-compression/bwt"
 	"stinky-compression/mft"
 	proto_data "stinky-compression/proto/proto-data"
+	"stinky-compression/rle"
 )
 
 func printTree(node *Node, prefix string, isLeft bool, isFirst bool) {
@@ -347,9 +348,10 @@ func TreeFromFrequencies(input FrequencyTable) *Node {
 	return buildCanonicalTree(codes)
 }
 
-func HuffmanEncoding(input []byte, debugMode bool) ([]CharPathEncoding, FrequencyTable, int) {
+func HuffmanEncoding(input []byte, debugMode bool) ([]CharPathEncoding, FrequencyTable, int, []int32) {
 	bwtCoded, pIdx := bwt.Bwt(input)
-	mftCoded := mft.Mft(bwtCoded)
+	rleCoded, rleDict := rle.Rle(bwtCoded)
+	mftCoded := mft.Mft(rleCoded)
 
 	occurance := FrequencyTable{}
 	for _, bt := range mftCoded {
@@ -369,10 +371,10 @@ func HuffmanEncoding(input []byte, debugMode bool) ([]CharPathEncoding, Frequenc
 		encoded = append(encoded, charDict[bt])
 	}
 
-	return encoded, occurance, pIdx
+	return encoded, occurance, pIdx, rleDict
 }
 
-func DecodeCompressionFromTable(bits []CharPathEncoding, dict FrequencyTable, bwtIdx int) []byte {
+func DecodeCompressionFromTable(bits []CharPathEncoding, dict FrequencyTable, bwtIdx int, rleDict []int32) []byte {
 	tree := TreeFromFrequencies(dict)
 	decoded := []byte{}
 	for _, bit := range bits {
@@ -390,7 +392,8 @@ func DecodeCompressionFromTable(bits []CharPathEncoding, dict FrequencyTable, bw
 	}
 
 	mftDecodd := mft.DecodeMft(decoded)
-	bwtDecoded := bwt.DecodeBwt(mftDecodd, bwtIdx)
+	rleDecoded := rle.DecodeRle(mftDecodd, rleDict)
+	bwtDecoded := bwt.DecodeBwt(rleDecoded, bwtIdx)
 
 	return bwtDecoded
 }
